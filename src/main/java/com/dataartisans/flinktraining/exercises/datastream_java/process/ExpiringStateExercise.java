@@ -21,8 +21,12 @@ import com.dataartisans.flinktraining.exercises.datastream_java.datatypes.TaxiRi
 import com.dataartisans.flinktraining.exercises.datastream_java.sources.CheckpointedTaxiFareSource;
 import com.dataartisans.flinktraining.exercises.datastream_java.sources.CheckpointedTaxiRideSource;
 import com.dataartisans.flinktraining.exercises.datastream_java.utils.ExerciseBase;
-import com.dataartisans.flinktraining.exercises.datastream_java.utils.MissingSolutionException;
+import org.apache.flink.api.common.state.ValueState;
+import org.apache.flink.api.common.state.ValueStateDescriptor;
+import org.apache.flink.api.common.typeinfo.TypeHint;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.ParameterTool;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.TimeCharacteristic;
@@ -32,6 +36,8 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.co.CoProcessFunction;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.OutputTag;
+
+import java.util.Map;
 
 /**
  * The "Expiring State" exercise from the Flink training
@@ -81,21 +87,80 @@ public class ExpiringStateExercise extends ExerciseBase {
 
 	public static class EnrichmentFunction extends CoProcessFunction<TaxiRide, TaxiFare, Tuple2<TaxiRide, TaxiFare>> {
 
+
+        private Map<Long, Tuple2<TaxiRide, TaxiFare>> joinStream;
+        /**
+         * ride ID with last-modified timestamp
+         */
+        ValueState<Tuple2<Long, Long>> rideState;
+        long maxTravelTime;
+
 		@Override
 		public void open(Configuration config) throws Exception {
-			throw new MissingSolutionException();
+            // type info for generic class
+            TypeInformation<Tuple2<Long, Long>> stateTypeInfo = TypeInformation.of(new TypeHint<Tuple2<Long, Long>>() {});
+		    rideState = getRuntimeContext().getState(new ValueStateDescriptor<>("rideState", stateTypeInfo));
+            // FIXME travel time
+            maxTravelTime = 6000000;
 		}
 
 		@Override
 		public void onTimer(long timestamp, OnTimerContext ctx, Collector<Tuple2<TaxiRide, TaxiFare>> out) throws Exception {
+            Tuple2<Long, Long> rideMarker = rideState.value();
+		    if (timestamp == rideMarker.f1 + maxTravelTime) {
+                Tuple2<TaxiRide, TaxiFare> rideFare = joinStream.remove(rideMarker.f0);
+                if (rideFare.f0 != null) {
+                    ctx.output(unmatchedRides, rideFare.f0);
+                } else if (rideFare.f1 != null) {
+                    ctx.output(unmatchedFares, rideFare.f1);
+                } else {
+                    assert false;
+                }
+            }
 		}
 
 		@Override
 		public void processElement1(TaxiRide ride, Context context, Collector<Tuple2<TaxiRide, TaxiFare>> out) throws Exception {
+            Tuple2<TaxiRide, TaxiFare> rideFare = joinStream.get(ride.rideId);
+            if (rideFare == null) { // new ride ID
+                rideFare = Tuple2.of(ride, null);
+                joinStream.put(ride.rideId, rideFare);
+                Tuple2<Long, Long> rideMarker = rideState.value();
+                if (rideMarker == null) {
+                    rideMarker = Tuple2.of(ride.rideId, context.timestamp());
+                }
+                rideMarker.setField(context.timestamp(), 1);
+                rideState.update(rideMarker);
+                context.timerService().registerEventTimeTimer(rideMarker.f1 + maxTravelTime);
+            } else if (rideFare.f0 == null) {  // match a ride
+                rideFare.setField(ride, 0);
+                out.collect(rideFare);
+                joinStream.remove(ride.rideId);
+            } else {  // duplicated ride
+                assert false;
+            }
 		}
 
 		@Override
 		public void processElement2(TaxiFare fare, Context context, Collector<Tuple2<TaxiRide, TaxiFare>> out) throws Exception {
+            Tuple2<TaxiRide, TaxiFare> rideFare = joinStream.get(fare.rideId);
+            if (rideFare == null) { // new ride ID
+                rideFare = Tuple2.of(null, fare);
+                joinStream.put(fare.rideId, rideFare);
+                Tuple2<Long, Long> rideMarker = rideState.value();
+                if (rideMarker == null) {
+                    rideMarker = Tuple2.of(fare.rideId, context.timestamp());
+                }
+                rideMarker.setField(context.timestamp(), 1);
+                rideState.update(rideMarker);
+                context.timerService().registerEventTimeTimer(rideMarker.f1 + maxTravelTime);
+            } else if (rideFare.f1 == null) {  // match a fare
+                rideFare.setField(fare, 1);
+                out.collect(rideFare);
+                joinStream.remove(fare.rideId);
+            } else {  // duplicated ride
+                assert false;
+            }
 		}
 	}
 }
