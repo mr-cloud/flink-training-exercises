@@ -37,6 +37,7 @@ import org.apache.flink.streaming.api.functions.co.CoProcessFunction;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.OutputTag;
 
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -97,11 +98,12 @@ public class ExpiringStateExercise extends ExerciseBase {
 
 		@Override
 		public void open(Configuration config) throws Exception {
+		    joinStream = new HashMap<>();
             // type info for generic class
             TypeInformation<Tuple2<Long, Long>> stateTypeInfo = TypeInformation.of(new TypeHint<Tuple2<Long, Long>>() {});
 		    rideState = getRuntimeContext().getState(new ValueStateDescriptor<>("rideState", stateTypeInfo));
-            // FIXME travel time
-            maxTravelTime = 6000000;
+            // travel time should be defined by service msg delay tolerance
+            maxTravelTime = Long.MAX_VALUE;
 		}
 
 		@Override
@@ -109,12 +111,14 @@ public class ExpiringStateExercise extends ExerciseBase {
             Tuple2<Long, Long> rideMarker = rideState.value();
 		    if (timestamp == rideMarker.f1 + maxTravelTime) {
                 Tuple2<TaxiRide, TaxiFare> rideFare = joinStream.remove(rideMarker.f0);
-                if (rideFare.f0 != null) {
-                    ctx.output(unmatchedRides, rideFare.f0);
-                } else if (rideFare.f1 != null) {
-                    ctx.output(unmatchedFares, rideFare.f1);
-                } else {
-                    assert false;
+                if (rideFare != null) {  // this ride ID has been removed because of match already in element processing.
+                    if (rideFare.f0 != null) {
+                        ctx.output(unmatchedRides, rideFare.f0);
+                    } else if (rideFare.f1 != null) {
+                        ctx.output(unmatchedFares, rideFare.f1);
+                    } else {
+                        assert false;
+                    }
                 }
             }
 		}
