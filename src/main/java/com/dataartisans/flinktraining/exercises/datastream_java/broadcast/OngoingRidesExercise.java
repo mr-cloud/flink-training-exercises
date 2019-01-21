@@ -31,11 +31,14 @@ import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.BroadcastStream;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.AssignerWithPunctuatedWatermarks;
 import org.apache.flink.streaming.api.functions.co.KeyedBroadcastProcessFunction;
+import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.util.Collector;
 import org.joda.time.format.DateTimeFormat;
 import org.joda.time.format.DateTimeFormatter;
 
+import javax.annotation.Nullable;
 import java.util.Locale;
 
 /**
@@ -76,7 +79,7 @@ public class OngoingRidesExercise extends ExerciseBase {
 		// add a socket source
 		BroadcastStream<String> queryStream = env.socketTextStream("localhost", 9999)
 				// EXERCISE QUESTION: Is this needed?
-				// .assignTimestampsAndWatermarks(new QueryStreamAssigner())
+//				 .assignTimestampsAndWatermarks(new QueryStreamAssigner())
 				.broadcast(dummyBroadcastState);
 
 		DataStream<TaxiRide> reports = rides
@@ -125,4 +128,16 @@ public class OngoingRidesExercise extends ExerciseBase {
 		}
 	}
 
+    private static class QueryStreamAssigner implements AssignerWithPunctuatedWatermarks<String> {
+        @Nullable
+        @Override
+        public Watermark checkAndGetNextWatermark(String lastElement, long extractedTimestamp) {
+            return null;
+        }
+
+        @Override
+        public long extractTimestamp(String element, long previousElementTimestamp) {
+            return 0;
+        }
+    }
 }
