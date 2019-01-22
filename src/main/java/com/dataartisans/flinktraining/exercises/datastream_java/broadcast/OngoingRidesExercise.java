@@ -37,6 +37,8 @@ import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.util.Collector;
 import org.joda.time.format.DateTimeFormat;
 import org.joda.time.format.DateTimeFormatter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 import java.util.Locale;
@@ -53,6 +55,8 @@ import java.util.Locale;
  *
  */
 public class OngoingRidesExercise extends ExerciseBase {
+    private static final Logger LOG = LoggerFactory.getLogger(OngoingRidesExercise.class);
+
 	public static void main(String[] args) throws Exception {
 
 		ParameterTool params = ParameterTool.fromArgs(args);
@@ -78,8 +82,8 @@ public class OngoingRidesExercise extends ExerciseBase {
 
 		// add a socket source
 		BroadcastStream<String> queryStream = env.socketTextStream("localhost", 9999)
-				// EXERCISE QUESTION: Is this needed?
-//				 .assignTimestampsAndWatermarks(new QueryStreamAssigner())
+				// EXERCISE QUESTION: Is this needed? Yes, it is. Timestamp of the element currently being processed for braodcast side stream.
+				 .assignTimestampsAndWatermarks(new QueryStreamAssigner())
 				.broadcast(dummyBroadcastState);
 
 		DataStream<TaxiRide> reports = rides
@@ -96,17 +100,23 @@ public class OngoingRidesExercise extends ExerciseBase {
 		private ValueStateDescriptor<TaxiRide> taxiDescriptor =
 				new ValueStateDescriptor<>("saved ride", TaxiRide.class);
 
+		private ValueState<TaxiRide> rideState;
+
 		@Override
 		public void open(Configuration config) throws MissingSolutionException {
-			throw new MissingSolutionException();
 			// We use a ValueState<TaxiRide> to store the latest ride event for each taxi.
+            rideState = getRuntimeContext().getState(taxiDescriptor);
 		}
 
 		@Override
 		public void processElement(TaxiRide ride, ReadOnlyContext ctx, Collector< TaxiRide> out) throws Exception {
 			// For every taxi, let's store the most up-to-date information.
 			// TaxiRide implements Comparable to make this easy.
-			throw new MissingSolutionException();
+            // we cannot expect the order of star and end msg for each ride.
+            TaxiRide savedRide = rideState.value();
+            if (ride.compareTo(savedRide) > 0) {
+                rideState.update(ride);
+            }
 		}
 
 		@Override
@@ -116,13 +126,21 @@ public class OngoingRidesExercise extends ExerciseBase {
 
 			Long thresholdInMinutes = Long.valueOf(msg);
 			Long wm = ctx.currentWatermark();
+			// imply that query time is at global approval timer e.g., watermark of rides stream
 			System.out.println("QUERY: " + thresholdInMinutes + " minutes at " + timeFormatter.print(wm));
 
 			// Collect to the output all ongoing rides that started at least thresholdInMinutes ago.
 			ctx.applyToKeyedState(taxiDescriptor, new KeyedStateFunction<Long, ValueState<TaxiRide>>() {
 				@Override
 				public void process(Long taxiId, ValueState<TaxiRide> taxiState) throws Exception {
-					throw new MissingSolutionException();
+                    TaxiRide savedRide = taxiState.value();
+                    // associated local keyed states would not be null.
+                    if (savedRide.isStart) {
+                        if ((wm - savedRide.getEventTime()) >= thresholdInMinutes * 60 * 1000) {
+                            LOG.warn("[OUTPUT] ongoing ride: {}", savedRide);
+                            out.collect(savedRide);
+                        }   
+                    }
 				}
 			});
 		}
@@ -132,7 +150,7 @@ public class OngoingRidesExercise extends ExerciseBase {
         @Nullable
         @Override
         public Watermark checkAndGetNextWatermark(String lastElement, long extractedTimestamp) {
-            return null;
+            return Watermark.MAX_WATERMARK;
         }
 
         @Override
