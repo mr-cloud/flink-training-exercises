@@ -112,7 +112,7 @@ public class OngoingRidesExercise extends ExerciseBase {
 		public void processElement(TaxiRide ride, ReadOnlyContext ctx, Collector< TaxiRide> out) throws Exception {
 			// For every taxi, let's store the most up-to-date information.
 			// TaxiRide implements Comparable to make this easy.
-            // we cannot expect the order of star and end msg for each ride.
+            // we cannot expect the order of start and end msg for each ride.
             TaxiRide savedRide = rideState.value();
             if (ride.compareTo(savedRide) > 0) {
                 rideState.update(ride);
@@ -141,6 +141,9 @@ public class OngoingRidesExercise extends ExerciseBase {
                             out.collect(savedRide);
                         }   
                     }
+                    // We cannot clean up ended rides because of rides are out-of-order.
+                    // The started rides may come later and store in process of keyed stream side,
+                    // which can cause collecting already ended rides when next time process of broadcast stream side.
 				}
 			});
 		}

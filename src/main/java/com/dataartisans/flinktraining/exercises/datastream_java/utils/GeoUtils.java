@@ -217,6 +217,7 @@ public class GeoUtils {
 	}
 
 	/**
+     * TOKNOW
 	 * Returns the Euclidean distance between two locations specified as lon/lat pairs.
 	 *
 	 * @param lon1 Longitude of first location
