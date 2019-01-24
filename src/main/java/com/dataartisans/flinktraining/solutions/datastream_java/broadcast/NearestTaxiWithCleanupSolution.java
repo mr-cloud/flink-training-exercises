@@ -220,7 +220,7 @@ public class NearestTaxiWithCleanupSolution extends ExerciseBase {
 	}
 
 	// Note that in order to have consistent results after a restore from a checkpoint, the
-	// behavior of this method must be deterministic, and NOT depend on characterisitcs of an
+	// behavior of this method must be deterministic, and NOT depend on characteristics of an
 	// individual sub-task.
 	public static class QueryFunction extends KeyedBroadcastProcessFunction<Long, TaxiRide, Query, Tuple3<Long, Long, Float>> {
 

@@ -76,6 +76,9 @@ import java.util.Random;
  * <li>
  *     对于所有taxi, 找出最靠近请求位置的那个taxi
  * </li>
+ * <li>
+ *     clean up out-dated states {@link com.dataartisans.flinktraining.solutions.datastream_java.broadcast.NearestTaxiWithCleanupSolution}
+ * </li>
  * </ol>
  * </div>
  *
@@ -204,7 +207,7 @@ public class NearestTaxiExercise extends ExerciseBase {
 	// individual sub-task.
 	public static class QueryFunction extends KeyedBroadcastProcessFunction<Long, TaxiRide, Query, Tuple3<Long, Long, Float>> {
         /**
-         * key is query ID, value is  minimal euclidean distance up to now.
+         * key is query ID, value is  minimal euclidean distance up to now. TO shrink the flow.
          */
 	    private MapState<Long, Float> minDistState;
 
@@ -230,12 +233,12 @@ public class NearestTaxiExercise extends ExerciseBase {
                     Float minDist = minDistState.get(ent.getKey());
                     float dist = (float) GeoUtils.getEuclideanDistance(ride.endLon, ride.endLat, ent.getValue().longitude, ent.getValue().latitude);
                     if (minDist == null) {
-                        minDist = dist;
-                    } else {
-                        minDist = Math.min(minDist, dist);
+                        minDist = Float.POSITIVE_INFINITY;
                     }
-                    minDistState.put(ent.getKey(), minDist);
-                    out.collect(Tuple3.of(ent.getKey(), ride.taxiId, minDist));
+                    if (dist < minDist) {
+                        minDistState.put(ent.getKey(), dist);
+                        out.collect(Tuple3.of(ent.getKey(), ride.taxiId, minDist));
+                    }
                 }
 			}
 		}
