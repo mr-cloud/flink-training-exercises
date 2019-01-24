@@ -28,18 +28,23 @@ import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.utils.ParameterTool;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.runtime.state.KeyedStateFunction;
 import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.BroadcastStream;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.AssignerWithPeriodicWatermarks;
+import org.apache.flink.streaming.api.functions.AssignerWithPunctuatedWatermarks;
 import org.apache.flink.streaming.api.functions.co.KeyedBroadcastProcessFunction;
 import org.apache.flink.streaming.api.functions.source.SocketTextStreamFunction;
+import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.util.Collector;
 import org.codehaus.commons.compiler.CompileException;
 import org.codehaus.janino.ExpressionEvaluator;
 import org.joda.time.format.DateTimeFormat;
 import org.joda.time.format.DateTimeFormatter;
 
+import javax.annotation.Nullable;
 import java.lang.reflect.InvocationTargetException;
 import java.util.Locale;
 
@@ -92,6 +97,19 @@ public class TaxiQueryExercise extends ExerciseBase {
 		// add a socket source for the query stream
 		BroadcastStream<String> queryStream = env
 				.addSource(stringSourceOrTest(new SocketTextStreamFunction("localhost", 9999, "\n", -1)))
+                // default watermark would be MIN_VALUE
+                .assignTimestampsAndWatermarks(new AssignerWithPeriodicWatermarks<String>() {
+                    @Nullable
+                    @Override
+                    public Watermark getCurrentWatermark() {
+                        return Watermark.MAX_WATERMARK;
+                    }
+
+                    @Override
+                    public long extractTimestamp(String element, long previousElementTimestamp) {
+                        return 0;
+                    }
+                })
 				.broadcast(queryDescriptor);
 
 		// connect the two streams and process queries
@@ -127,10 +145,12 @@ public class TaxiQueryExercise extends ExerciseBase {
 				taxiState.update(ride);
 			}
 
-			// TODO: only collect this event if the current query evaluates to TRUE for this ride
-			out.collect(new Tuple2<>("PE@" + timeFormatter.print(ctx.currentWatermark()), ride.toString()));
+			// only collect this event if the current query evaluates to TRUE for this ride
+            ExpressionEvaluator ee = (ExpressionEvaluator) ctx.getBroadcastState(queryDescriptor).get(QUERY_KEY);
+			if (evaluateBooleanExpression(ee, taxiState.value(), ctx.currentWatermark())) {
+                out.collect(new Tuple2<>("PE@" + timeFormatter.print(ctx.currentWatermark()), ride.toString()));
+            }
 
-			throw new MissingSolutionException();
 		}
 
 		@Override
@@ -140,12 +160,20 @@ public class TaxiQueryExercise extends ExerciseBase {
 
 			out.collect(new Tuple2<>("QUERY", query));
 
-			// TODO: Store the incoming query in broadcast state
+			// Store the incoming query in broadcast state
+            ExpressionEvaluator ee = cookBooleanExpression(query);
+            ctx.getBroadcastState(queryDescriptor).put(QUERY_KEY, ee);
 
-			// TODO: Use applyToKeyedState to process the incoming query with every saved ride
-
-			// TODO: Whenever the query evaluates to TRUE, emit that saved ride
-			//     out.collect(new Tuple2<>("PBE@" + timeFormatter.print(ctx.currentWatermark()), ride.toString()));
+			// Use applyToKeyedState to process the incoming query with every saved ride
+            ctx.applyToKeyedState(rideDescriptor, new KeyedStateFunction<Long, ValueState<TaxiRide>>() {
+                @Override
+                public void process(Long taxiId, ValueState<TaxiRide> state) throws Exception {
+                    TaxiRide ride = state.value();
+                    // Whenever the query evaluates to TRUE, emit that saved ride
+                    if (evaluateBooleanExpression(ee, ride, ctx.currentWatermark()))
+                        out.collect(new Tuple2<>("PBE@" + timeFormatter.print(ctx.currentWatermark()), ride.toString()));
+                }
+            });
 
 		}
 
