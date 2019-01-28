@@ -20,6 +20,8 @@ import com.dataartisans.flinktraining.exercises.datastream_java.datatypes.TaxiRi
 import com.dataartisans.flinktraining.exercises.datastream_java.sources.TaxiRideSource;
 import com.dataartisans.flinktraining.exercises.datastream_java.utils.MissingSolutionException;
 import com.dataartisans.flinktraining.exercises.datastream_java.utils.ExerciseBase;
+import org.apache.flink.api.common.state.ValueState;
+import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.java.utils.ParameterTool;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.TimeCharacteristic;
@@ -27,59 +29,92 @@ import org.apache.flink.streaming.api.TimerService;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
+import org.apache.flink.streaming.api.windowing.time.Time;
 import org.apache.flink.util.Collector;
 
 /**
  * The "Long Ride Alerts" exercise of the Flink training
  * (http://training.data-artisans.com).
- *
+ * <p>
  * The goal for this exercise is to emit START events for taxi rides that have not been matched
  * by an END event during the first 2 hours of the ride.
- *
+ * <p>
  * Parameters:
  * -input path-to-input-file
- *
  */
 public class LongRidesExercise extends ExerciseBase {
-	public static void main(String[] args) throws Exception {
+    public static void main(String[] args) throws Exception {
 
-		ParameterTool params = ParameterTool.fromArgs(args);
-		final String input = params.get("input", ExerciseBase.pathToRideData);
+        ParameterTool params = ParameterTool.fromArgs(args);
+        final String input = params.get("input", ExerciseBase.pathToRideData);
 
-		final int maxEventDelay = 60;       // events are out of order by max 60 seconds
-		final int servingSpeedFactor = 600; // events of 10 minutes are served in 1 second
+        final int maxEventDelay = 60;       // events are out of order by max 60 seconds
+        final int servingSpeedFactor = 600; // events of 10 minutes are served in 1 second
 
-		// set up streaming execution environment
-		StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-		env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime);
-		env.setParallelism(ExerciseBase.parallelism);
+        // set up streaming execution environment
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime);
+        env.setParallelism(ExerciseBase.parallelism);
 
-		// start the data generator
-		DataStream<TaxiRide> rides = env.addSource(rideSourceOrTest(new TaxiRideSource(input, maxEventDelay, servingSpeedFactor)));
+        // start the data generator
+        DataStream<TaxiRide> rides = env.addSource(rideSourceOrTest(new TaxiRideSource(input, maxEventDelay, servingSpeedFactor)));
 
-		DataStream<TaxiRide> longRides = rides
-				.keyBy(ride -> ride.rideId)
-				.process(new MatchFunction());
+        DataStream<TaxiRide> longRides = rides
+                .keyBy(ride -> ride.rideId)
+                .process(new MatchFunction());
 
-		printOrTest(longRides);
+        printOrTest(longRides);
 
-		env.execute("Long Taxi Rides");
-	}
+        env.execute("Long Taxi Rides");
+    }
 
-	public static class MatchFunction extends KeyedProcessFunction<Long, TaxiRide, TaxiRide> {
+    public static class MatchFunction extends KeyedProcessFunction<Long, TaxiRide, TaxiRide> {
+        ValueState<TaxiRide> rideState;
+        long maxEventDelay = 60 * 1000;
 
-		@Override
-		public void open(Configuration config) throws Exception {
-			throw new MissingSolutionException();
-		}
+        @Override
+        public void open(Configuration config) throws Exception {
+            rideState = getRuntimeContext().getState(new ValueStateDescriptor<TaxiRide>("ride-state", TaxiRide.class));
+        }
 
-		@Override
-		public void processElement(TaxiRide ride, Context context, Collector<TaxiRide> out) throws Exception {
-			TimerService timerService = context.timerService();
-		}
+        @Override
+        /**
+         * update state as needed
+         */
+        public void processElement(TaxiRide ride, Context context, Collector<TaxiRide> out) throws Exception {
+            TaxiRide savedState = rideState.value();
 
-		@Override
-		public void onTimer(long timestamp, OnTimerContext context, Collector<TaxiRide> out) throws Exception {
-		}
-	}
+
+            /*
+            if (ride.isStart) {
+                if (savedState == null) {  // pattern: start, [future end]
+                    rideState.update(ride);
+                }
+            } else {  // [null | start], end
+                rideState.update(ride);
+            }
+            <=>
+            */
+            // remember the last event by event time of each rideId
+            if (ride.compareTo(savedState) > 0) {
+                rideState.update(ride);
+            }
+
+            // ensure to clear all created states
+            TimerService timerService = context.timerService();
+            timerService.registerEventTimeTimer(Time.minutes(120).toMilliseconds());
+        }
+
+        @Override
+        /**
+         * clear state and output long ride
+         */
+        public void onTimer(long timestamp, OnTimerContext context, Collector<TaxiRide> out) throws Exception {
+            TaxiRide savedState = rideState.value();
+            if (savedState != null && savedState.isStart) {
+                out.collect(savedState);
+            }
+            rideState.clear();
+        }
+    }
 }

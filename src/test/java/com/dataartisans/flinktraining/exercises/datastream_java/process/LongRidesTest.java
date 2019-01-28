@@ -21,6 +21,7 @@ import com.dataartisans.flinktraining.exercises.datastream_java.testing.TaxiRide
 import com.dataartisans.flinktraining.solutions.datastream_java.process.LongRidesSolution;
 import com.google.common.collect.Lists;
 import org.joda.time.DateTime;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.util.List;
@@ -33,6 +34,30 @@ public class LongRidesTest extends TaxiRideTestBase<TaxiRide> {
 	static Testable javaCEPExercise = () -> com.dataartisans.flinktraining.exercises.datastream_java.cep.LongRidesExercise.main(new String[]{});
 
 	private DateTime beginning = new DateTime(2000, 1, 1, 0, 0);
+
+	@Ignore
+	@Test
+    /**
+     * anti-cep-sample: out of order between tick time with end event.
+     * Flink’s CEP library assumes correctness of the watermark,
+     * and considers as late elements whose timestamp is smaller than that of the last seen watermark.
+     * Late elements are not further processed.
+     */
+	public void outOfOrderOnEndEvent() throws Exception {
+        DateTime tickTime = beginning.plusHours(2);
+	    DateTime halfMinLater = beginning.plusSeconds(30);
+	    DateTime halfMinEarly = beginning.minusSeconds(30);
+        TaxiRide rideStarted = startRide(1, beginning);
+        TaxiRide endedHalfMinEarly = endRide(rideStarted, halfMinEarly);
+        Long markTickTime = tickTime.getMillis();
+        Long markHalfMinLater = halfMinLater.getMillis();
+
+        TestRideSource source = new TestRideSource(rideStarted, markTickTime, endedHalfMinEarly, markHalfMinLater);
+//        assert(results(source).isEmpty());
+        List<TaxiRide> actual = cepResults(source);
+        System.out.println(actual);
+        assert(actual.isEmpty());
+    }
 
 	@Test
 	public void shortRide() throws Exception {

@@ -26,6 +26,7 @@ import org.apache.flink.cep.PatternFlatSelectFunction;
 import org.apache.flink.cep.PatternFlatTimeoutFunction;
 import org.apache.flink.cep.PatternStream;
 import org.apache.flink.cep.pattern.Pattern;
+import org.apache.flink.cep.pattern.conditions.SimpleCondition;
 import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
@@ -40,64 +41,75 @@ import java.util.Map;
 /**
  * The goal for this exercise is to emit START events for taxi rides that have not been matched
  * by an END event during the first 2 hours of the ride.
- *
+ * <p>
  * Parameters:
  * -input path-to-input-file
- *
  */
 public class LongRidesExercise extends ExerciseBase {
-	public static void main(String[] args) throws Exception {
+    public static void main(String[] args) throws Exception {
 
-		ParameterTool params = ParameterTool.fromArgs(args);
-		final String input = params.get("input", ExerciseBase.pathToRideData);
+        ParameterTool params = ParameterTool.fromArgs(args);
+        final String input = params.get("input", ExerciseBase.pathToRideData);
 
-		final int servingSpeedFactor = 600; // events of 10 minutes are served in 1 second
+        final int servingSpeedFactor = 600; // events of 10 minutes are served in 1 second
 
-		StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-		env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime);
-		env.setParallelism(ExerciseBase.parallelism);
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime);
+        env.setParallelism(ExerciseBase.parallelism);
 
-		// CheckpointedTaxiRideSource delivers events in order
-		DataStream<TaxiRide> rides = env.addSource(rideSourceOrTest(new CheckpointedTaxiRideSource(input, servingSpeedFactor)));
+        // CheckpointedTaxiRideSource delivers events in order
+        DataStream<TaxiRide> rides = env.addSource(rideSourceOrTest(new CheckpointedTaxiRideSource(input, servingSpeedFactor)));
 
-		DataStream<TaxiRide> keyedRides = rides
-			.keyBy("rideId");
+        DataStream<TaxiRide> keyedRides = rides
+                .keyBy("rideId");
 
-		// A complete taxi ride has a START event followed by an END event
-		// This pattern is incomplete ...
-		Pattern<TaxiRide, TaxiRide> completedRides = Pattern.<TaxiRide>begin("start");
+        // A complete taxi ride has a START event followed by an END event
+        // This pattern is incomplete ...
+        Pattern<TaxiRide, TaxiRide> completedRides = Pattern.<TaxiRide>begin("start")
+                .where(new SimpleCondition<TaxiRide>() {
+                    @Override
+                    public boolean filter(TaxiRide value) throws Exception {
+                        return value.isStart;
+                    }
+                })
+                .followedBy("end").where(new SimpleCondition<TaxiRide>() {
+                    @Override
+                    public boolean filter(TaxiRide value) throws Exception {
+                        return !value.isStart;
+                    }
+                });
 
-		// We want to find rides that have NOT been completed within 120 minutes.
-		// This pattern matches rides that ARE completed.
-		// Below we will ignore rides that match this pattern, and emit those that timeout.
-		PatternStream<TaxiRide> patternStream = CEP.pattern(keyedRides, completedRides.within(Time.minutes(120)));
+        // We want to find rides that have NOT been completed within 120 minutes.
+        // This pattern matches rides that ARE completed.
+        // Below we will ignore rides that match this pattern, and emit those that timeout.
+        PatternStream<TaxiRide> patternStream = CEP.pattern(keyedRides, completedRides.within(Time.minutes(120)));
 
-		OutputTag<TaxiRide> timedout = new OutputTag<TaxiRide>("timedout"){};
+        OutputTag<TaxiRide> timedout = new OutputTag<TaxiRide>("timedout") {
+        };
 
-		SingleOutputStreamOperator<TaxiRide> longRides = patternStream.flatSelect(
-				timedout,
-				new TaxiRideTimedOut<TaxiRide>(),
-				new FlatSelectNothing<TaxiRide>()
-		);
+        SingleOutputStreamOperator<TaxiRide> longRides = patternStream.flatSelect(
+                timedout,
+                new TaxiRideTimedOut<TaxiRide>(),
+                new FlatSelectNothing<TaxiRide>()
+        );
 
-		printOrTest(longRides.getSideOutput(timedout));
+        printOrTest(longRides.getSideOutput(timedout));
 
-		throw new MissingSolutionException();
 
-//		env.execute("Long Taxi Rides (CEP)");
-	}
+        env.execute("Long Taxi Rides (CEP)");
+    }
 
-	public static class TaxiRideTimedOut<TaxiRide> implements PatternFlatTimeoutFunction<TaxiRide, TaxiRide> {
-		@Override
-		public void timeout(Map<String, List<TaxiRide>> map, long l, Collector<TaxiRide> collector) throws Exception {
-			TaxiRide rideStarted = map.get("start").get(0);
-			collector.collect(rideStarted);
-		}
-	}
+    public static class TaxiRideTimedOut<TaxiRide> implements PatternFlatTimeoutFunction<TaxiRide, TaxiRide> {
+        @Override
+        public void timeout(Map<String, List<TaxiRide>> map, long l, Collector<TaxiRide> collector) throws Exception {
+            TaxiRide rideStarted = map.get("start").get(0);
+            collector.collect(rideStarted);
+        }
+    }
 
-	public static class FlatSelectNothing<T> implements PatternFlatSelectFunction<T, T> {
-		@Override
-		public void flatSelect(Map<String, List<T>> pattern, Collector<T> collector) {
-		}
-	}
+    public static class FlatSelectNothing<T> implements PatternFlatSelectFunction<T, T> {
+        @Override
+        public void flatSelect(Map<String, List<T>> pattern, Collector<T> collector) {
+        }
+    }
 }
