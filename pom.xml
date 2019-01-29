@@ -420,7 +420,8 @@
 				</configuration>
 			</plugin>
 
-			<plugin>
+            <!--TOKNOW-->
+			<!--<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-checkstyle-plugin</artifactId>
 				<version>3.0.0</version>
@@ -437,7 +438,8 @@
 					<configLocation>/tools/maven/checkstyle.xml</configLocation>
 					<logViolationsToConsole>true</logViolationsToConsole>
 				</configuration>
-			</plugin>
+			</plugin>-->
+
 			<!-- We use the maven-shade plugin to create a fat jar that contains all dependencies
 			except flink and it's transitive dependencies. The resulting fat-jar can be executed
 			on a cluster. Change the value of Program-Class if your program entry point changes. -->

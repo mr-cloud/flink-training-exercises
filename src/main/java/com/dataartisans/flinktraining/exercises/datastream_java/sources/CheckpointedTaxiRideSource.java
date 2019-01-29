@@ -61,7 +61,7 @@ public class CheckpointedTaxiRideSource implements SourceFunction<TaxiRide>, Lis
 	private transient BufferedReader reader;
 	private transient InputStream gzipStream;
 
-	// state
+	// state, i.e., internal state
 	// number of emitted events
 	private long eventCnt = 0;
 
@@ -165,6 +165,8 @@ public class CheckpointedTaxiRideSource implements SourceFunction<TaxiRide>, Lis
 	@Override
 	public void restoreState(List<Long> state) throws Exception {
 		for (Long s : state)
-			this.eventCnt = s;
+			this.eventCnt = s;  // FIXME incremental?
 	}
+
+
 }

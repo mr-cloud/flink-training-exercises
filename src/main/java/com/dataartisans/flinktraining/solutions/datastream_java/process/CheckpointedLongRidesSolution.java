@@ -60,7 +60,7 @@ public class CheckpointedLongRidesSolution extends ExerciseBase {
 		// set up streaming execution environment
 		StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 		env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime);
-		env.setParallelism(ExerciseBase.parallelism);
+		env.setParallelism(1);
 
 		// set up checkpointing
 		env.setStateBackend(new FsStateBackend("file:///tmp/checkpoints"));
