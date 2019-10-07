@@ -120,6 +120,7 @@ public class CheckpointedTaxiRideSource implements SourceFunction<TaxiRide>, Lis
 				Thread.sleep(diff);
 			}
 
+			// isolate state change and message emitting from doing checkpoint
 			synchronized (lock) {
 				eventCnt++;
 				sourceContext.collectWithTimestamp(ride, rideTime);
@@ -165,7 +166,7 @@ public class CheckpointedTaxiRideSource implements SourceFunction<TaxiRide>, Lis
 	@Override
 	public void restoreState(List<Long> state) throws Exception {
 		for (Long s : state)
-			this.eventCnt = s;  // FIXME incremental?
+			this.eventCnt += s;  // incremental for change of parallelism
 	}
 
 
