@@ -102,7 +102,7 @@ public class ExpiringStateExercise extends ExerciseBase {
             // type info for generic class
             TypeInformation<Tuple2<Long, Long>> stateTypeInfo = TypeInformation.of(new TypeHint<Tuple2<Long, Long>>() {});
 		    rideState = getRuntimeContext().getState(new ValueStateDescriptor<>("rideState", stateTypeInfo));
-            // travel time should be defined by service msg delay tolerance
+            // travel time should be defined by service msg delay tolerance TOKNOW overflow,程序保证不溢出
             maxTravelTime = Long.MAX_VALUE;
 		}
 

@@ -67,15 +67,16 @@ import java.util.Random;
  * <br/>
  * <pr>
  * <div>
+ * The expected output is a stream of rides ending with each successive ride being closer to the requested location.
+ * 输出的结束行程流, 每一个车辆都比上一个车辆更接近指定查询的地方.
  *     sln:
  * <ol>
- * <li>
- *     The expected output is a stream of rides ending with each successive ride being closer to the requested location.
- *     对于每个taxi，找出历史路线中(及查询之后的下一次骑乘?)结束在最靠近请求位置的那次骑乘.
- * </li>
- * <li>
- *     对于所有taxi, 找出最靠近请求位置的那个taxi
- * </li>
+ *     <li>
+ *         构造BROADCAST-KEYEDSTREAM联合算子, 每个结束行程到来,更新该算子所有QUERY的最短距离Taxi.
+ *     </li>
+ *     <li>
+ *         由于每个BROADCAST-KEYEDSTREAM算子实例只接受到部分结束行程,因此下游还需按照QUERY ID聚合,计算出该QUERY的全局最短Taxi.
+ *     </li>
  * <li>
  *     clean up out-dated states {@link com.dataartisans.flinktraining.solutions.datastream_java.broadcast.NearestTaxiWithCleanupSolution}
  * </li>
